@@ -12,7 +12,10 @@ from shared.constants import EVENT_LOAN_CREATED, EVENT_CREDIT_CHECKED
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("credit-service")
 
-AMQP_URL = os.getenv("AMQP_URL", "amqp://guest:guest@rabbitmq:5672/")
+AMQP_URL = os.getenv(
+    "AMQP_URL",
+    "amqp://guest:guest@localhost:5672/"
+)
 
 app = FastAPI(title="Credit Service")
 
