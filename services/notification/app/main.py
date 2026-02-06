@@ -11,7 +11,10 @@ from shared.constants import EVENT_DECISION_MADE
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("notification-service")
 
-AMQP_URL = os.getenv("AMQP_URL", "amqp://guest:guest@rabbitmq:5672/")
+AMQP_URL = os.getenv(
+    "AMQP_URL",
+    "amqp://guest:guest@localhost:5672/"
+)
 
 app = FastAPI(title="Notification Service")
 
@@ -25,13 +28,12 @@ def handle_decision_made(event: dict):
     envelope = EventEnvelope(**event)
     payload = DecisionMadePayload(**envelope.payload)
 
-    loan_id = payload.loan_id
-    decision = payload.decision
-    reasons = payload.reasons
-
-    # Simulation notification client
+    # 📣 Simulation notification client
     logger.info(
-        f"Notification sent | loan_id={loan_id} | decision={decision} | reasons={reasons}"
+        "Notification sent | loan_id=%s | decision=%s | reasons=%s",
+        payload.loan_id,
+        payload.decision,
+        payload.reasons,
     )
 
 
