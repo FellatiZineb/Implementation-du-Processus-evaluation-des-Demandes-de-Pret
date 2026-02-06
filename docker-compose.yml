@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   rabbitmq:
     image: rabbitmq:3-management
@@ -8,7 +6,9 @@ services:
       - "15672:15672"
 
   loan:
-    build: ./services/loan
+    build:
+      context: .
+      dockerfile: services/loan/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -17,7 +17,9 @@ services:
       - rabbitmq
 
   credit:
-    build: ./services/credit
+    build:
+      context: .
+      dockerfile: services/credit/Dockerfile
     ports:
       - "8001:8000"
     environment:
@@ -26,7 +28,9 @@ services:
       - rabbitmq
 
   property:
-    build: ./services/property
+    build:
+      context: .
+      dockerfile: services/property/Dockerfile
     ports:
       - "8002:8000"
     environment:
@@ -35,7 +39,9 @@ services:
       - rabbitmq
 
   decision:
-    build: ./services/decision
+    build:
+      context: .
+      dockerfile: services/decision/Dockerfile
     ports:
       - "8003:8000"
     environment:
@@ -44,7 +50,9 @@ services:
       - rabbitmq
 
   notification:
-    build: ./services/notification
+    build:
+      context: .
+      dockerfile: services/notification/Dockerfile
     ports:
       - "8004:8000"
     environment:
