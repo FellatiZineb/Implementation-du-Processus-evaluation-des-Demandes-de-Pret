@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  loan:
+    build: ./services/loan
+    ports:
+      - "8000:8000"
+    environment:
+      - AMQP_URL=amqp://guest:guest@rabbitmq:5672//
+    depends_on:
+      - rabbitmq
+
+  credit:
+    build: ./services/credit
+    ports:
+      - "8001:8000"
+    environment:
+      - AMQP_URL=amqp://guest:guest@rabbitmq:5672//
+    depends_on:
+      - rabbitmq
+
+  property:
+    build: ./services/property
+    ports:
+      - "8002:8000"
+    environment:
+      - AMQP_URL=amqp://guest:guest@rabbitmq:5672//
+    depends_on:
+      - rabbitmq
+
+  decision:
+    build: ./services/decision
+    ports:
+      - "8003:8000"
+    environment:
+      - AMQP_URL=amqp://guest:guest@rabbitmq:5672//
+    depends_on:
+      - rabbitmq
+
+  notification:
+    build: ./services/notification
+    ports:
+      - "8004:8000"
+    environment:
+      - AMQP_URL=amqp://guest:guest@rabbitmq:5672//
+    depends_on:
+      - rabbitmq
