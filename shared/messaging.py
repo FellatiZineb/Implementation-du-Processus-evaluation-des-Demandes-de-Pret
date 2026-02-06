@@ -8,6 +8,7 @@ import time
 from typing import Callable, Optional
 
 import pika
+from pydantic import ValidationError
 
 from shared.constants import EXCHANGE_NAME, EXCHANGE_TYPE
 
@@ -15,6 +16,9 @@ logger = logging.getLogger("messaging")
 
 
 def _connect(amqp_url: str, retries: int = 30, delay_s: float = 1.0) -> pika.BlockingConnection:
+    if not amqp_url:
+        raise RuntimeError("AMQP_URL is not set")
+
     last_err: Optional[Exception] = None
     for _ in range(retries):
         try:
@@ -24,6 +28,7 @@ def _connect(amqp_url: str, retries: int = 30, delay_s: float = 1.0) -> pika.Blo
             last_err = e
             logger.warning("RabbitMQ not ready, retrying: %s", e)
             time.sleep(delay_s)
+
     raise RuntimeError(f"Failed to connect to RabbitMQ after {retries} retries: {last_err}")
 
 
@@ -36,8 +41,7 @@ def publish_event(amqp_url: str, routing_key: str, event_dict: dict) -> None:
     try:
         ch = conn.channel()
         setup_exchange(ch)
-        body = json.dumps(event_dict).encode("utf-8")
-
+        body = json.dumps(event_dict, default=str).encode("utf-8")
         ch.basic_publish(
             exchange=EXCHANGE_NAME,
             routing_key=routing_key,
@@ -71,8 +75,17 @@ def consume_events(
             payload = json.loads(body.decode("utf-8"))
             on_message(payload)
             channel.basic_ack(delivery_tag=method.delivery_tag)
+
+        except ValidationError as e:
+            logger.error("Invalid message schema, dropping (no requeue): %s", e)
+            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+        except json.JSONDecodeError as e:
+            logger.error("Invalid JSON, dropping (no requeue): %s", e)
+            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
         except Exception as e:
-            logger.exception("Error processing message, will nack and requeue: %s", e)
+            logger.exception("Error processing message, requeueing: %s", e)
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
     ch.basic_qos(prefetch_count=10)

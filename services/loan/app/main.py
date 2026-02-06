@@ -48,7 +48,7 @@ def create_loan(req: LoanCreateRequest):
         payload=payload.model_dump(),
     )
 
-    publish_event(AMQP_URL, EVENT_LOAN_CREATED, event.model_dump())
+    publish_event(AMQP_URL, EVENT_LOAN_CREATED, event.model_dump(mode="json"))
 
     logger.info("Loan created loan_id=%s", loan_id)
     return {"loan_id": loan_id}
