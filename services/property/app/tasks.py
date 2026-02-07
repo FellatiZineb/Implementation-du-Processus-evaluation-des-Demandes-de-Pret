@@ -1,25 +1,72 @@
-import random
-import time
+# services/property/app/main.py
+import os
+import threading
 import logging
-from shared.schemas import PropertyEvaluatedPayload
 
-from .celery_app import celery_app
+from fastapi import FastAPI
 
-logger = logging.getLogger("property-tasks")
+from shared.messaging import consume_events, publish_event
+from shared.constants import (
+    EVENT_LOAN_CREATED,
+    EVENT_PROPERTY_EVALUATED,
+    EVENT_PROPERTY_FAILED,
+)
+from shared.schemas import EventEnvelope, LoanCreatedPayload
+
+from .tasks import evaluate_property_task
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("property")
+
+AMQP_URL = os.getenv("AMQP_URL", "amqp://guest:guest@localhost:5672/")
+
+app = FastAPI(title="Property Service")
 
 
-@celery_app.task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 3})
-def evaluate_property_task(self, loan_id: str, amount: float):
-    logger.info("Evaluating property | loan_id=%s", loan_id)
+@app.get("/health")
+def health():
+    return {"status": "property service running"}
 
-    # simulation tâche longue
-    time.sleep(5)
 
-    property_value = float(random.randint(50_000, 500_000))
-    property_ok = property_value >= amount * 1.2
+def handle_loan_created(event: dict):
+    envelope = EventEnvelope(**event)
+    payload = LoanCreatedPayload(**envelope.payload)
 
-    return PropertyEvaluatedPayload(
-        loan_id=loan_id,
-        property_value=property_value,
-        property_ok=property_ok,
-    ).model_dump(mode="json")
+    async_result = evaluate_property_task.delay(
+        str(payload.loan_id),
+        payload.amount,
+    )
+
+    logger.info("Property task queued | loan_id=%s", payload.loan_id)
+
+    # ⬇⬇⬇ NOUVEAU : on récupère le résultat du task
+    result = async_result.get(timeout=30)
+
+    if result["status"] == "FAILED":
+        publish_event(
+            AMQP_URL,
+            EVENT_PROPERTY_FAILED,
+            {
+                "loan_id": result["loan_id"],
+                "reason": "property evaluation failed",
+            },
+        )
+        logger.warning("Property FAILED | loan_id=%s", result["loan_id"])
+
+    else:
+        publish_event(
+            AMQP_URL,
+            EVENT_PROPERTY_EVALUATED,
+            result,
+        )
+        logger.info("Property OK | loan_id=%s", result["loan_id"])
+
+
+@app.on_event("startup")
+def startup():
+    thread = threading.Thread(
+        target=consume_events,
+        args=(AMQP_URL, "q.property", [EVENT_LOAN_CREATED], handle_loan_created),
+        daemon=True,
+    )
+    thread.start()

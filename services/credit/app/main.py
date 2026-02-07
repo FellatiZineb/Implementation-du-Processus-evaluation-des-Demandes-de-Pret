@@ -8,6 +8,9 @@ from .tasks import check_credit_task  # Celery task
 from shared.messaging import consume_events
 from shared.schemas import EventEnvelope
 from shared.constants import EVENT_LOAN_CREATED
+from shared.constants import     EVENT_CREDIT_FAILED,   # ⬅️ NOUVEAU
+from shared.constants import EVENT_CREDIT_COMPENSATE
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("credit-service")
@@ -37,6 +40,13 @@ def handle_loan_created(event: dict):
     logger.info("Credit task queued | loan_id=%s", loan_id)
 
 
+def handle_credit_compensate(event: dict):
+    envelope = EventEnvelope(**event)
+    loan_id = envelope.correlation_id
+
+    logger.warning("COMPENSATION CREDIT | loan_id=%s", loan_id)
+    # ici tu annules ce que tu veux (log, statut, etc.)
+
 @app.on_event("startup")
 def startup_event():
     thread = threading.Thread(
@@ -49,4 +59,17 @@ def startup_event():
         ),
         daemon=True,
     )
+    thread_compensate = threading.Thread(
+    target=consume_events,
+    args=(
+        AMQP_URL,
+        "q.credit.compensate",
+        [EVENT_CREDIT_COMPENSATE],
+        handle_credit_compensate,
+    ),
+    daemon=True,
+)
+
+    thread_compensate.start()
+
     thread.start()

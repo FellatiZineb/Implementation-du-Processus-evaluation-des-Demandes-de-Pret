@@ -9,6 +9,12 @@ EVENT_PROPERTY_EVALUATED = "property.evaluated"
 EVENT_DECISION_MADE = "decision.made"
 EVENT_NOTIFICATION_SENT = "notification.sent"
 
+EVENT_CREDIT_FAILED = "credit.failed"
+EVENT_PROPERTY_FAILED = "property.failed"
+EVENT_CREDIT_COMPENSATE = "credit.compensate"
+
+EVENT_PROPERTY_COMPENSATE = "property.compensate"
+
 ROUTING_KEYS = {
     EVENT_LOAN_CREATED: EVENT_LOAN_CREATED,
     EVENT_CREDIT_CHECKED: EVENT_CREDIT_CHECKED,

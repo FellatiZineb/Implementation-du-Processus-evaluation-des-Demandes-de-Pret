@@ -3,6 +3,7 @@ import threading
 import logging
 
 from fastapi import FastAPI
+from shared.constants import EVENT_CREDIT_FAILED
 
 from shared.messaging import consume_events, publish_event
 from shared.schemas import (
@@ -15,6 +16,8 @@ from shared.constants import (
     EVENT_CREDIT_CHECKED,
     EVENT_PROPERTY_EVALUATED,
     EVENT_DECISION_MADE,
+    EVENT_PROPERTY_FAILED,      # ⬅️ NOUVEAU
+    EVENT_CREDIT_FAILED,     # ⬅️ NOUVEAU
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -101,6 +104,37 @@ def handle_property_evaluated(event: dict):
 
     try_make_decision(loan_id)
 
+def handle_property_failed(event: dict):
+    loan_id = event["loan_id"]
+
+    logger.warning(
+        "Property FAILED detected | triggering compensation | loan_id=%s",
+        loan_id,
+    )
+
+    publish_event(
+        AMQP_URL,
+        EVENT_CREDIT_CANCELLED,
+        {
+            "loan_id": loan_id,
+            "reason": "property evaluation failed",
+        },
+    )
+
+    # nettoyage si jamais credit était déjà stocké
+    decision_state.pop(loan_id, None)
+
+def handle_credit_failed(event: dict):
+    envelope = EventEnvelope(**event)
+    loan_id = envelope.payload["loan_id"]
+
+    payload = DecisionMadePayload(
+        loan_id=loan_id,
+        decision="REJECTED",
+        reasons=["credit check failed"]
+    )
+
+    publish_event(AMQP_URL, EVENT_DECISION_MADE, payload.model_dump())
 
 @app.on_event("startup")
 def startup_event():
@@ -125,6 +159,30 @@ def startup_event():
         ),
         daemon=True,
     )
+    thread_credit_failed = threading.Thread(
+        target=consume_events,
+        args=(
+            AMQP_URL,
+            "q.decision.credit.failed",
+            [EVENT_CREDIT_FAILED],
+            handle_credit_failed,
+        ),
+        daemon=True,
+    )
+    thread_property_failed = threading.Thread(
+    target=consume_events,
+    args=(
+        AMQP_URL,
+        "q.decision.property.failed",
+        [EVENT_PROPERTY_FAILED],
+        handle_property_failed,
+    ),
+    daemon=True,
+)
 
     thread_credit.start()
     thread_property.start()
+    thread_property_failed.start()
+    thread_credit_failed.start()
+
+
