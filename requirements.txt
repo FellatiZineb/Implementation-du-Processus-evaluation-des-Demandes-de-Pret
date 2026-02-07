@@ -3,3 +3,4 @@ uvicorn
 pika
 pydantic
 celery
+flower
