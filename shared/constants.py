@@ -8,6 +8,7 @@ EVENT_CREDIT_CHECKED = "credit.checked"
 EVENT_PROPERTY_EVALUATED = "property.evaluated"
 EVENT_DECISION_MADE = "decision.made"
 EVENT_NOTIFICATION_SENT = "notification.sent"
+EVENT_CREDIT_CANCELLED = "credit.compensate"
 
 EVENT_CREDIT_FAILED = "credit.failed"
 EVENT_PROPERTY_FAILED = "property.failed"

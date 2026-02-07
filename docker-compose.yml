@@ -28,6 +28,18 @@ services:
 
     depends_on:
       - rabbitmq
+  credit-worker:
+    build:
+      context: .
+      dockerfile: services/credit/Dockerfile
+    environment:
+      - AMQP_URL=amqp://guest:guest@rabbitmq:5672/%2F
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+    depends_on:
+      - rabbitmq
+    command: celery -A app.celery_app.celery_app worker -l info
+
+
 
   property:
     build:
@@ -37,6 +49,16 @@ services:
       - "8002:8000"
     environment:
       - AMQP_URL=amqp://guest:guest@rabbitmq:5672/%2F
+    depends_on:
+      - rabbitmq
+  property-worker:
+    build:
+      context: .
+      dockerfile: services/property/Dockerfile
+    environment:
+      - CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672//
+      - AMQP_URL=amqp://guest:guest@rabbitmq:5672/%2F
+    command: celery -A app.celery_app.celery_app worker -l info
     depends_on:
       - rabbitmq
 

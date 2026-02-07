@@ -6,6 +6,7 @@ import json
 import logging
 import time
 from typing import Callable, Optional
+from urllib.parse import urlparse, unquote
 
 import pika
 from pydantic import ValidationError
@@ -15,18 +16,33 @@ from shared.constants import EXCHANGE_NAME, EXCHANGE_TYPE
 logger = logging.getLogger("messaging")
 
 
+def _amqp_context(amqp_url: str) -> str:
+    try:
+        u = urlparse(amqp_url)
+        host = u.hostname or ""
+        port = u.port or ""
+        vhost = unquote((u.path or "/")[1:]) if (u.path or "/") != "/" else "/"
+        return f"host={host} port={port} vhost={vhost}"
+    except Exception:
+        return "host=? port=? vhost=?"
+
+
 def _connect(amqp_url: str, retries: int = 30, delay_s: float = 1.0) -> pika.BlockingConnection:
     if not amqp_url:
         raise RuntimeError("AMQP_URL is not set")
 
     last_err: Optional[Exception] = None
-    for _ in range(retries):
+    ctx = _amqp_context(amqp_url)
+
+    for attempt in range(1, retries + 1):
         try:
             params = pika.URLParameters(amqp_url)
-            return pika.BlockingConnection(params)
+            conn = pika.BlockingConnection(params)
+            logger.info("RabbitMQ connected | %s", ctx)
+            return conn
         except Exception as e:
             last_err = e
-            logger.warning("RabbitMQ not ready, retrying: %s", e)
+            logger.warning("RabbitMQ not ready, retrying | attempt=%d/%d | %s | err=%s", attempt, retries, ctx, e)
             time.sleep(delay_s)
 
     raise RuntimeError(f"Failed to connect to RabbitMQ after {retries} retries: {last_err}")
@@ -41,8 +57,13 @@ def publish_event(amqp_url: str, routing_key: str, event_dict: dict) -> None:
     try:
         ch = conn.channel()
         setup_exchange(ch)
+
+        # Publisher confirms: lets you detect unroutable or failed publishes.
+        ch.confirm_delivery()
+
         body = json.dumps(event_dict, default=str).encode("utf-8")
-        ch.basic_publish(
+
+        ok = ch.basic_publish(
             exchange=EXCHANGE_NAME,
             routing_key=routing_key,
             body=body,
@@ -50,8 +71,17 @@ def publish_event(amqp_url: str, routing_key: str, event_dict: dict) -> None:
                 content_type="application/json",
                 delivery_mode=2,
             ),
+            mandatory=False,
         )
-        logger.info("Published event routing_key=%s", routing_key)
+
+        logger.info(
+            "Published event | exchange=%s | routing_key=%s | bytes=%d | confirmed=%s | %s",
+            EXCHANGE_NAME,
+            routing_key,
+            len(body),
+            ok,
+            _amqp_context(amqp_url),
+        )
     finally:
         conn.close()
 
@@ -90,5 +120,13 @@ def consume_events(
 
     ch.basic_qos(prefetch_count=10)
     ch.basic_consume(queue=queue_name, on_message_callback=_callback)
-    logger.info("Consuming queue=%s bindings=%s", queue_name, binding_keys)
+
+    logger.info(
+        "Consuming | exchange=%s | queue=%s | bindings=%s | %s",
+        EXCHANGE_NAME,
+        queue_name,
+        binding_keys,
+        _amqp_context(amqp_url),
+    )
+
     ch.start_consuming()

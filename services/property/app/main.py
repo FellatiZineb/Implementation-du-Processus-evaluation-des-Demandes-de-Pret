@@ -11,7 +11,7 @@ from .tasks import evaluate_property_task
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("property")
 
-AMQP_URL = os.getenv("AMQP_URL", "amqp://guest:guest@localhost:5672/")
+AMQP_URL = os.getenv("AMQP_URL", "amqp://guest:guest@rabbitmq:5672/%2F")
 
 app = FastAPI(title="Property Service")
 
@@ -24,12 +24,12 @@ def handle_loan_created(event: dict):
     payload = LoanCreatedPayload(**envelope.payload)
 
     evaluate_property_task.delay(
+        envelope.correlation_id,
         str(payload.loan_id),
-        payload.amount
+        payload.amount,
     )
 
     logger.info("Property task queued | loan_id=%s", payload.loan_id)
-
 
 @app.on_event("startup")
 def startup():

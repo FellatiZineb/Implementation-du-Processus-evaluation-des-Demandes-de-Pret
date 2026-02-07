@@ -3,7 +3,6 @@ import threading
 import logging
 
 from fastapi import FastAPI
-from shared.constants import EVENT_CREDIT_FAILED
 
 from shared.messaging import consume_events, publish_event
 from shared.schemas import (
@@ -16,18 +15,18 @@ from shared.constants import (
     EVENT_CREDIT_CHECKED,
     EVENT_PROPERTY_EVALUATED,
     EVENT_DECISION_MADE,
-    EVENT_PROPERTY_FAILED,      # ⬅️ NOUVEAU
-    EVENT_CREDIT_FAILED,     # ⬅️ NOUVEAU
+    EVENT_PROPERTY_FAILED,
+    EVENT_CREDIT_FAILED,
+    EVENT_CREDIT_CANCELLED,
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("decision-service")
 
-AMQP_URL = os.getenv("AMQP_URL", "amqp://guest:guest@rabbitmq:5672/")
+AMQP_URL = os.getenv("AMQP_URL", "amqp://guest:guest@rabbitmq:5672/%2F")
 
 app = FastAPI(title="Decision Service")
 
-# stockage temporaire en mémoire
 decision_state = {}
 
 
@@ -38,6 +37,7 @@ def health():
 
 def try_make_decision(loan_id):
     state = decision_state.get(loan_id)
+    logger.info("try_make_decision | loan_id=%s | keys=%s", loan_id, list(state.keys()) if state else None)
     if not state:
         return
 
@@ -59,7 +59,7 @@ def try_make_decision(loan_id):
             reasons=reasons,
         )
 
-        event = EventEnvelope(
+        out_event = EventEnvelope(
             event_type=EVENT_DECISION_MADE,
             correlation_id=loan_id,
             payload=payload.model_dump(),
@@ -68,14 +68,11 @@ def try_make_decision(loan_id):
         publish_event(
             AMQP_URL,
             EVENT_DECISION_MADE,
-            event.model_dump(),
+            out_event.model_dump(),
         )
 
-        logger.info(
-            f"Decision made | loan_id={loan_id} | decision={decision}"
-        )
+        logger.info("Decision made | loan_id=%s | decision=%s", loan_id, decision)
 
-        # nettoyage
         del decision_state[loan_id]
 
 
@@ -83,12 +80,10 @@ def handle_credit_checked(event: dict):
     envelope = EventEnvelope(**event)
     payload = CreditCheckedPayload(**envelope.payload)
 
-    loan_id = payload.loan_id
-
+    loan_id = str(payload.loan_id)
     decision_state.setdefault(loan_id, {})["credit"] = payload.model_dump()
 
-    logger.info(f"Credit result received | loan_id={loan_id}")
-
+    logger.info("Credit result received | loan_id=%s", loan_id)
     try_make_decision(loan_id)
 
 
@@ -96,93 +91,89 @@ def handle_property_evaluated(event: dict):
     envelope = EventEnvelope(**event)
     payload = PropertyEvaluatedPayload(**envelope.payload)
 
-    loan_id = payload.loan_id
-
+    loan_id = str(payload.loan_id)
     decision_state.setdefault(loan_id, {})["property"] = payload.model_dump()
 
-    logger.info(f"Property result received | loan_id={loan_id}")
-
+    logger.info("Property result received | loan_id=%s", loan_id)
     try_make_decision(loan_id)
 
+
 def handle_property_failed(event: dict):
-    loan_id = event["loan_id"]
+    envelope = EventEnvelope(**event)
+    loan_id = str(envelope.correlation_id)
 
-    logger.warning(
-        "Property FAILED detected | triggering compensation | loan_id=%s",
-        loan_id,
-    )
+    logger.warning("Property FAILED detected | triggering compensation | loan_id=%s", loan_id)
 
-    publish_event(
-        AMQP_URL,
-        EVENT_CREDIT_CANCELLED,
-        {
+    out_event = EventEnvelope(
+        event_type=EVENT_CREDIT_CANCELLED,
+        correlation_id=loan_id,
+        payload={
             "loan_id": loan_id,
             "reason": "property evaluation failed",
         },
     )
 
-    # nettoyage si jamais credit était déjà stocké
+    publish_event(
+        AMQP_URL,
+        EVENT_CREDIT_CANCELLED,
+        out_event.model_dump(),
+    )
+
     decision_state.pop(loan_id, None)
+
 
 def handle_credit_failed(event: dict):
     envelope = EventEnvelope(**event)
-    loan_id = envelope.payload["loan_id"]
+    loan_id = str(envelope.correlation_id)
 
     payload = DecisionMadePayload(
         loan_id=loan_id,
         decision="REJECTED",
-        reasons=["credit check failed"]
+        reasons=["credit check failed"],
     )
 
-    publish_event(AMQP_URL, EVENT_DECISION_MADE, payload.model_dump())
+    out_event = EventEnvelope(
+        event_type=EVENT_DECISION_MADE,
+        correlation_id=loan_id,
+        payload=payload.model_dump(),
+    )
+
+    publish_event(
+        AMQP_URL,
+        EVENT_DECISION_MADE,
+        out_event.model_dump(),
+    )
+
+    logger.info("Credit failed -> decision made | loan_id=%s", loan_id)
+
 
 @app.on_event("startup")
 def startup_event():
     thread_credit = threading.Thread(
         target=consume_events,
-        args=(
-            AMQP_URL,
-            "q.decision.credit",
-            [EVENT_CREDIT_CHECKED],
-            handle_credit_checked,
-        ),
+        args=(AMQP_URL, "q.decision.credit", [EVENT_CREDIT_CHECKED], handle_credit_checked),
         daemon=True,
     )
 
     thread_property = threading.Thread(
         target=consume_events,
-        args=(
-            AMQP_URL,
-            "q.decision.property",
-            [EVENT_PROPERTY_EVALUATED],
-            handle_property_evaluated,
-        ),
+        args=(AMQP_URL, "q.decision.property", [EVENT_PROPERTY_EVALUATED], handle_property_evaluated),
         daemon=True,
     )
+
     thread_credit_failed = threading.Thread(
         target=consume_events,
-        args=(
-            AMQP_URL,
-            "q.decision.credit.failed",
-            [EVENT_CREDIT_FAILED],
-            handle_credit_failed,
-        ),
+        args=(AMQP_URL, "q.decision.credit.failed", [EVENT_CREDIT_FAILED], handle_credit_failed),
         daemon=True,
     )
+
     thread_property_failed = threading.Thread(
-    target=consume_events,
-    args=(
-        AMQP_URL,
-        "q.decision.property.failed",
-        [EVENT_PROPERTY_FAILED],
-        handle_property_failed,
-    ),
-    daemon=True,
-)
+        target=consume_events,
+        args=(AMQP_URL, "q.decision.property.failed", [EVENT_PROPERTY_FAILED], handle_property_failed),
+        daemon=True,
+    )
 
     thread_credit.start()
     thread_property.start()
     thread_property_failed.start()
     thread_credit_failed.start()
-
-

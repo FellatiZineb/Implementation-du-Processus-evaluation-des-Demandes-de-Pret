@@ -1,16 +1,13 @@
-from celery import Celery
 import os
+from celery import Celery
 
-AMQP_URL = os.getenv(
-    "AMQP_URL",
-    "amqp://guest:guest@localhost:5672//"
-)
+BROKER_URL = os.getenv("CELERY_BROKER_URL", "amqp://guest:guest@rabbitmq:5672//")
 
 celery_app = Celery(
     "property",
-    broker=AMQP_URL,
+    broker=BROKER_URL,
     backend="rpc://",
-    include=["services.property.app.tasks"]  
+    include=["app.tasks"],
 )
 
 celery_app.conf.update(

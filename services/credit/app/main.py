@@ -4,21 +4,18 @@ import logging
 
 from fastapi import FastAPI
 
-from .tasks import check_credit_task  # Celery task
+from .tasks import check_credit_task
 from shared.messaging import consume_events
 from shared.schemas import EventEnvelope
-from shared.constants import EVENT_LOAN_CREATED
-from shared.constants import     EVENT_CREDIT_FAILED,   # ⬅️ NOUVEAU
-from shared.constants import EVENT_CREDIT_COMPENSATE
-
+from shared.constants import (
+    EVENT_LOAN_CREATED,
+    EVENT_CREDIT_COMPENSATE,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("credit-service")
 
-AMQP_URL = os.getenv(
-    "AMQP_URL",
-    "amqp://guest:guest@localhost:5672/"
-)
+AMQP_URL = os.getenv("AMQP_URL", "amqp://guest:guest@rabbitmq:5672/%2F")
 
 app = FastAPI(title="Credit Service")
 
@@ -33,43 +30,31 @@ def handle_loan_created(event: dict):
     payload = envelope.payload
 
     loan_id = payload["loan_id"]
+    correlation_id = envelope.correlation_id
 
-    #  délégation au worker Celery
-    check_credit_task.delay(str(loan_id))
-
+    check_credit_task.delay(correlation_id, str(loan_id))
     logger.info("Credit task queued | loan_id=%s", loan_id)
 
 
 def handle_credit_compensate(event: dict):
     envelope = EventEnvelope(**event)
-    loan_id = envelope.correlation_id
+    correlation_id = envelope.correlation_id
 
-    logger.warning("COMPENSATION CREDIT | loan_id=%s", loan_id)
-    # ici tu annules ce que tu veux (log, statut, etc.)
+    logger.warning("COMPENSATION CREDIT | correlation_id=%s", correlation_id)
+
 
 @app.on_event("startup")
 def startup_event():
     thread = threading.Thread(
         target=consume_events,
-        args=(
-            AMQP_URL,
-            "credit-queue",
-            [EVENT_LOAN_CREATED],
-            handle_loan_created,
-        ),
+        args=(AMQP_URL, "credit-queue", [EVENT_LOAN_CREATED], handle_loan_created),
         daemon=True,
     )
-    thread_compensate = threading.Thread(
-    target=consume_events,
-    args=(
-        AMQP_URL,
-        "q.credit.compensate",
-        [EVENT_CREDIT_COMPENSATE],
-        handle_credit_compensate,
-    ),
-    daemon=True,
-)
-
-    thread_compensate.start()
-
     thread.start()
+
+    thread_compensate = threading.Thread(
+        target=consume_events,
+        args=(AMQP_URL, "q.credit.compensate", [EVENT_CREDIT_COMPENSATE], handle_credit_compensate),
+        daemon=True,
+    )
+    thread_compensate.start()
