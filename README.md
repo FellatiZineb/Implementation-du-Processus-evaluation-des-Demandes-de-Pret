@@ -1,4 +1,4 @@
-# 🏦 Loan Application Evaluation System
+# Loan Application Evaluation System
 
 An event-driven microservices application designed to automate the evaluation of loan applications through independent credit assessment, property evaluation and centralized decision-making services.
 
@@ -260,10 +260,9 @@ The application demonstrates the architecture and communication patterns of a di
 
 **Zineb Fellati** and project collaborators.
 
-M2 DataScale — Université de Versailles Saint-Quentin-en-Yvelines.
+M2 DataScale  Université de Versailles Saint-Quentin-en-Yvelines.
 
 Academic project.
 
 ---
-
-⭐ Explore the repository to discover the implementation of each microservice.
+ Explore the repository to discover the implementation of each microservice.
